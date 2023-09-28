@@ -31,6 +31,7 @@ import os
 from datetime import datetime, timedelta, timezone
 import getpass
 import sys
+import json
 
 if len(sys.argv) > 1:
     infile = sys.argv[1]
@@ -83,6 +84,8 @@ dates = {}
 
 existing_hashes = {}
 
+"""
+# HACK: let's not worry about existing stuff
 print('Scanning output dir', outpath)
 for directory, subdirlist, filelist in os.walk(outpath):
     for fname in filelist:
@@ -110,16 +113,17 @@ for directory, subdirlist, filelist in os.walk(outpath):
             print('File', fname, 'does not seem to be RST, skipping', ext)
 
 print('Found', len(existing_hashes), 'existing note hashes')
+"""
+
 print('Processing clippings file', infile)
         
-mc = open(infile, 'r')
+mc = open(infile, 'r', encoding="utf-8", errors="ignore")
 
-mc.read(1)  # Skip first character
+#mc.read(1)  # Skip first character
 
 line = mc.readline().strip()
         
-while line:
-    
+while line:    
     key = line.strip()
     result_title = regex_title.findall(key)    # Extract title and author
     line = mc.readline().strip()                # Read information line
@@ -134,8 +138,10 @@ while line:
     
     if len(result_loc):
         note_loc = result_loc[0]
+        locs = note_loc.split("-")        
     else:
         note_loc = ''
+        locs = [0]
         
     if len(result_page):
         note_page = result_page[0]
@@ -175,7 +181,7 @@ while line:
         datestr = date
     
     notes[note_hash] = note_text.strip()
-    locations[note_hash] = locstr
+    locations[note_hash] = locs #Originally: locstr
     types[note_hash] = note_type
     dates[note_hash] = datestr
         
@@ -197,10 +203,10 @@ for key in pub_title.keys():
     if len(short_title) > 128:
         short_title = short_title[:127]
     if (nr_notes > 2):
-        fname = author + ' - ' + short_title.strip() + '.rst'
+        fname = author + ' - ' + short_title.strip() + '.mbp'
         short = 0
     else:
-        fname = 'short_notes.rst'
+        fname = 'short_notes.mbp'
         short = 1
 
     new_hashes = 0
@@ -217,16 +223,31 @@ for key in pub_title.keys():
         
     newfile = os.path.isfile(outfile)
     
-    out = open(outfile, 'a')
-    
+    # Now we build an object that matches the .MBP file format,
+    # which is serialized JSON for this object
+
+    mbp = { 
+        "md5": "",
+        "payLoad": {
+            "acr": "",
+            "guid": "",
+            "key": "",
+            "type": "",
+            "records": []
+        }
+    }
+
+    # HACK - don't need all this
+    """    
     if short:
         # Short note, output a small header and append to short note file
+        # HACK: this isn't modified for JSON
         if author != 'Unknown':
             titlestr = author + ' - ' + title
         else:
             titlestr = title
-        out.write(titlestr + '\n')
-        out.write(('-' * len(titlestr)) + '\n\n')
+        #out.write(titlestr + '\n')
+        #out.write(('-' * len(titlestr)) + '\n\n')
     elif not newfile:
         # Many notes, output with header and metadata in a separate file
         titlestr = 'Highlights from ' + title
@@ -234,7 +255,8 @@ for key in pub_title.keys():
         out.write(('=' * len(titlestr)) + '\n\n')
         if author != 'Unknown':
             out.write(':authors: ' + author + '\n\n')
-            
+    """
+
     last_date = datetime.now()
     
     for note_hash in pub_hashes[key]:
@@ -242,32 +264,77 @@ for key in pub_title.keys():
         note_type = types[note_hash]
         note_date = dates[note_hash]
         note_loc = locations[note_hash]
-        if note_hash in existing_hashes:
+
+        if note_hash in existing_hashes:            
             print('Note', note_hash, 'is already in', existing_hashes[note_hash])
         else:
             print('Adding new note to', outfile + ':', note_hash, note_type, note_loc, note_date)
+
+            # Add an object to the mbp.payLoad.records
+            """
+            {
+                "endPosition": 3546,
+                "metadata": {
+                    "mchl_color": "yellow"
+                },
+                "startPosition": 3448,
+                "type": "kindle.highlight"
+            },
+            {
+                "endPosition": 3546,
+                "startPosition": 3546,
+                "text": "Test note\n",
+                "type": "kindle.note"
+            },
+            """
+
+            record = {}
+
+            if note_type == "Highlight":
+                record["type"] = "kindle.highlight"
+                record["metadata"] = { "mchl_color": "yellow" }
+            else:
+                record["type"] = "kindle.note"
+                record["text"] = note_text.strip()
+
+            # Make start and end the same if there's only one
+            if len(note_loc) == 1:
+                note_loc.append(note_loc[0])
+
+            record["startPosition"] = int(note_loc[0])
+            record["endPosition"] = int(note_loc[1])
+
+            #comment = str(commentstr + note_hash + ' ; ' + note_type + ' ; ' + note_loc + ' ; ' + note_date)
             
-            comment = str(commentstr + note_hash + ' ; ' + note_type + ' ; ' + note_loc + ' ; ' + note_date)
-            
-            if short:
-                comment += ' ; ' + author + ' ; ' + title
+            #if short:
+            #    comment += ' ; ' + author + ' ; ' + title
                 
-            out.write(comment + '\n\n')
-            out.write(note + '\n\n')
+            #out.write(comment + '\n\n')
+            #out.write(note + '\n\n')
+        """
         try:
             last_date = parse(note_date)
         except:
             pass
-            
-    out.close()
-    
+        """
+
+        mbp["payLoad"]["records"].append(record)
+
+    with open(outfile, "w") as write_file:
+        json.dump(mbp, write_file)
+
+#    out = open(outfile, 'a')
+    # Serialize JSON to file, or just print to output
+#    out.close()
+
+    """
     # Update file modification time to time of last note
-    
+
     if last_date.tzinfo is None or last_date.tzinfo.utcoffset(last_date) is None:
         epoch = datetime(1970, 1, 1)
     else:    
         epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     note_timestamp = (last_date - epoch) / timedelta(seconds=1)    
     os.utime(outfile, (note_timestamp, note_timestamp))
-    
+    """
 
